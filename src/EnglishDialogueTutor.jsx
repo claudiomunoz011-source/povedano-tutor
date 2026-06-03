@@ -76,8 +76,8 @@ const fallbackFollowUp = {
   street:     ["Where would you like to go?", "Do you prefer the bus or the subway?", "Do you have a map or use your phone?"],
 };
 
-// ── OpenAI call ──────────────────────────────────────────────────────────────
-async function callOpenAI(apiKey, scenario, level, history, studentInput) {
+// ── Gemini API call ──────────────────────────────────────────────────────────
+async function callGemini(apiKey, scenario, level, history, studentInput) {
   const systemPrompt = `You are an English conversation tutor for ${SCHOOL_NAME}.
 Your role: play the role of a native English speaker in a "${scenario}" scenario.
 The student's English level is ${level}.
@@ -91,30 +91,34 @@ Rules:
 6. Be encouraging and friendly.
 7. Keep total response under 80 words.`;
 
-  const messages = [
-    { role: "system", content: systemPrompt },
+  // Build conversation as Gemini contents array
+  const contents = [
     ...history.map(m => ({
-      role: m.role === "tutor" ? "assistant" : "user",
-      content: m.text,
+      role: m.role === "tutor" ? "model" : "user",
+      parts: [{ text: m.text }],
     })),
-    { role: "user", content: studentInput },
+    { role: "user", parts: [{ text: studentInput }] },
   ];
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model: "gpt-4o-mini", messages, temperature: 0.7, max_tokens: 200 }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 300 },
+      }),
+    }
+  );
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `API error ${res.status}`);
   }
   const data = await res.json();
-  return data.choices[0].message.content.trim();
+  return data.candidates[0].content.parts[0].text.trim();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -195,7 +199,7 @@ export default function EnglishDialogueTutor() {
       setIsLoading(true);
       try {
         const currentHistory = [...messages, studentMsg];
-        const aiReply = await callOpenAI(apiKey, scenario, level, messages, content);
+        const aiReply = await callGemini(apiKey, scenario, level, messages, content);
         setMessages(m => [...m, { role: "tutor", text: aiReply }]);
         // Check if AI noted a correction (contains "📝 Tip:")
         const hasTip = aiReply.includes("📝");
@@ -273,7 +277,7 @@ export default function EnglishDialogueTutor() {
               <p className="text-sm md:text-base text-slate-600 mt-1">
                 Practice real English conversations. Automatic correction and progress tracking per student.
                 {apiKey
-                  ? <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 font-semibold"><CheckCircle className="h-3.5 w-3.5" /> AI Active</span>
+                  ? <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 font-semibold"><CheckCircle className="h-3.5 w-3.5" /> Gemini AI Active</span>
                   : <span className="ml-2 text-amber-500 font-medium">⚠️ No API Key — using fallback mode</span>
                 }
               </p>
@@ -313,7 +317,7 @@ export default function EnglishDialogueTutor() {
         )}
 
         <div className="text-center text-xs text-slate-500 mt-6">
-          {apiKey ? "🤖 Powered by OpenAI GPT-4o mini" : "Demo mode — add your OpenAI API Key in the Teacher Panel to enable AI responses."}
+          {apiKey ? "🤖 Powered by Google Gemini 1.5 Flash" : "Demo mode — add your Google AI Studio API Key in the Teacher Panel to enable AI responses."}
         </div>
       </div>
     </div>
@@ -559,13 +563,13 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Key className="h-5 w-5 text-indigo-600" />
-          <span className="text-base font-bold text-slate-800">OpenAI API Key — AI Configuration</span>
+          <span className="text-base font-bold text-slate-800">Google Gemini API Key — AI Configuration</span>
           {apiKey && <span className="ml-auto inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 font-semibold px-2 py-0.5 rounded-full"><CheckCircle className="h-3 w-3" /> Active</span>}
         </div>
 
         <p className="text-sm text-slate-600 mb-4">
-          Enter your <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-indigo-600 underline">OpenAI API Key</a> to enable AI-powered responses. Without it, the tutor uses a basic fallback mode.
-          The key is stored only in this browser — it is never sent to any server other than OpenAI.
+          Enter your <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-indigo-600 underline">Google AI Studio API Key</a> to enable AI-powered responses. Without it, the tutor uses a basic fallback mode.
+          The key is stored only in this browser — it is never sent to any server other than Google.
         </p>
 
         <div className="flex gap-2 items-center">
@@ -574,7 +578,7 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
               type={showKey ? "text" : "password"}
               value={keyInput}
               onChange={e => { setKeyInput(e.target.value); setSaved(false); }}
-              placeholder="sk-proj-..."
+              placeholder="AIza..."
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm pr-10 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button onClick={() => setShowKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -596,7 +600,7 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
         {!apiKey && (
           <div className="mt-3 flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>No API key set. Students will receive static, repetitive responses. Add your key above to enable GPT-4o mini powered conversations.</span>
+            <span>No API key set. Students will receive static, repetitive responses. Add your Google AI Studio key above to enable Gemini AI conversations.</span>
           </div>
         )}
       </div>
