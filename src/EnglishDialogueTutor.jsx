@@ -119,7 +119,7 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
   ];
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -417,7 +417,7 @@ export default function EnglishDialogueTutor() {
         )}
 
         <p className="text-center text-xs text-slate-400 mt-6">
-          {apiKey ? "🤖 Powered by Google Gemini 2.0 Flash" : "Demo mode — enter your Google AI Studio API Key in the Teacher Panel."}
+          {apiKey ? "🤖 Powered by Google Gemini 3.5 Flash" : "Demo mode — enter your Google AI Studio API Key in the Teacher Panel."}
         </p>
       </div>
     </div>
