@@ -1,4 +1,20 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Component, useEffect, useMemo, useRef, useState } from "react";
+
+// ── Error Boundary ────────────────────────────────────────────────────────────
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700 text-sm">
+        <p className="font-bold mb-2">⚠️ An error occurred in this panel:</p>
+        <pre className="whitespace-pre-wrap text-xs bg-red-100 rounded-xl p-3 overflow-auto">{this.state.error?.message || String(this.state.error)}</pre>
+        <button onClick={() => this.setState({ error: null })} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-xl text-sm hover:bg-red-700">Try again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, BookOpenCheck, Users, Download, RefreshCw, Languages,
@@ -103,7 +119,7 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
   ];
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -142,7 +158,7 @@ function PasswordModal({ onSuccess, onClose }) {
 
   const handleSubmit = e => {
     e.preventDefault();
-    if (pwd === TEACHER_PASS) { onSuccess(); }
+    if (pwd.trim() === TEACHER_PASS.trim()) { onSuccess(); }
     else { setError("Incorrect password. Please try again."); setPwd(""); }
   };
 
@@ -309,14 +325,25 @@ export default function EnglishDialogueTutor() {
     a.click();
   };
 
-  // Stats
-  let totalSessions=0, totalTurns=0, totalMistakes=0;
-  const byScenario = {};
-  Object.values(progress).forEach(arr => (arr||[]).forEach(r => {
-    totalSessions++; totalTurns += r.turns; totalMistakes += r.mistakes;
-    if (!byScenario[r.scenario]) byScenario[r.scenario] = { sessions:0, turns:0, mistakes:0 };
-    byScenario[r.scenario].sessions++; byScenario[r.scenario].turns += r.turns; byScenario[r.scenario].mistakes += r.mistakes;
-  }));
+  // Stats (memoized)
+  const { totalSessions, totalTurns, totalMistakes, byScenario } = useMemo(() => {
+    let totalSessions=0, totalTurns=0, totalMistakes=0;
+    const byScenario = {};
+    try {
+      Object.values(progress || {}).forEach(arr => (Array.isArray(arr) ? arr : []).forEach(r => {
+        if (!r) return;
+        totalSessions++;
+        totalTurns    += (r.turns    || 0);
+        totalMistakes += (r.mistakes || 0);
+        const sc = r.scenario || "unknown";
+        if (!byScenario[sc]) byScenario[sc] = { sessions:0, turns:0, mistakes:0 };
+        byScenario[sc].sessions++;
+        byScenario[sc].turns    += (r.turns    || 0);
+        byScenario[sc].mistakes += (r.mistakes || 0);
+      }));
+    } catch(e) { console.error("Stats error:", e); }
+    return { totalSessions, totalTurns, totalMistakes, byScenario };
+  }, [progress]);
 
   const handleTeacherClick = () => setShowPassModal(true);
   const handlePassSuccess  = () => { setShowPassModal(false); setMode("teacher"); };
@@ -380,15 +407,17 @@ export default function EnglishDialogueTutor() {
             downloadTranscript={downloadTranscript} isLoading={isLoading} aiError={aiError}
           />
         ) : (
-          <TeacherPanel
-            students={students} progress={progress} byScenario={byScenario}
-            totalSessions={totalSessions} totalTurns={totalTurns} totalMistakes={totalMistakes}
-            exportProgressCSV={exportProgressCSV} apiKey={apiKey} setApiKey={setApiKey}
-          />
+          <ErrorBoundary>
+            <TeacherPanel
+              students={students || []} progress={progress || {}} byScenario={byScenario || {}}
+              totalSessions={totalSessions || 0} totalTurns={totalTurns || 0} totalMistakes={totalMistakes || 0}
+              exportProgressCSV={exportProgressCSV} apiKey={apiKey || ""} setApiKey={setApiKey}
+            />
+          </ErrorBoundary>
         )}
 
         <p className="text-center text-xs text-slate-400 mt-6">
-          {apiKey ? "🤖 Powered by Google Gemini 1.5 Flash" : "Demo mode — enter your Google AI Studio API Key in the Teacher Panel."}
+          {apiKey ? "🤖 Powered by Google Gemini 2.0 Flash" : "Demo mode — enter your Google AI Studio API Key in the Teacher Panel."}
         </p>
       </div>
     </div>
