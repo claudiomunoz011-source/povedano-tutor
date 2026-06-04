@@ -110,13 +110,39 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
     `(4) Add a "📝 Tip:" line only when there's something to correct. ` +
     `(5) End with a follow-up question. (6) Be encouraging. (7) Max 80 words.`;
 
-  const contents = [
-    ...history.map(m => ({
-      role: m.role === "tutor" ? "model" : "user",
-      parts: [{ text: m.text }],
-    })),
-    { role: "user", parts: [{ text: userInput }] },
-  ];
+  // Filter out any error or fallback warning messages from history
+  const cleanHistory = history.filter(m => 
+    m.text && 
+    !m.text.includes("⚠️ AI error") && 
+    !m.text.includes("Fallback mode") &&
+    !m.text.includes("Check your API key")
+  );
+
+  const contents = [];
+  let lastRole = null;
+
+  const addPart = (role, text) => {
+    if (role === lastRole) {
+      if (contents.length > 0) {
+        contents[contents.length - 1].parts[0].text += "\n" + text;
+      }
+      return;
+    }
+    contents.push({ role, parts: [{ text }] });
+    lastRole = role;
+  };
+
+  // Process history
+  cleanHistory.forEach(m => {
+    const apiRole = m.role === "tutor" ? "model" : "user";
+    if (contents.length === 0 && apiRole === "model") {
+      addPart("user", "Hello, let's start the dialogue.");
+    }
+    addPart(apiRole, m.text);
+  });
+
+  // Add the new user input
+  addPart("user", userInput);
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
