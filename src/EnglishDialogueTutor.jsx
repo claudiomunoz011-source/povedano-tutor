@@ -144,22 +144,55 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
   // Add the new user input
   addPart("user", userInput);
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { temperature: 0.75, maxOutputTokens: 300 },
-      }),
-    }
-  );
+  const fetchFromModel = async (modelName) => {
+    return await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: { temperature: 0.75, maxOutputTokens: 300 },
+        }),
+      }
+    );
+  };
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `API error ${res.status}`);
+  let res;
+  try {
+    res = await fetchFromModel("gemini-3.5-flash");
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const errMsg = errData?.error?.message || "";
+      const isTransient = res.status === 429 || res.status === 503 || errMsg.toLowerCase().includes("demand") || errMsg.toLowerCase().includes("limit") || errMsg.toLowerCase().includes("quota");
+      
+      if (isTransient) {
+        // Wait 1.5s and retry gemini-3.5-flash
+        await new Promise(r => setTimeout(r, 1500));
+        res = await fetchFromModel("gemini-3.5-flash");
+        
+        if (!res.ok) {
+          // Fall back to gemini-3.1-pro-preview if still failing
+          res = await fetchFromModel("gemini-3.1-pro-preview");
+        }
+      } else {
+        // Re-create the response object so we can throw the error normally below
+        res = { ok: false, json: async () => errData, status: res.status };
+      }
+    }
+  } catch (e) {
+    // If network failure or other error, try fallback
+    try {
+      res = await fetchFromModel("gemini-3.1-pro-preview");
+    } catch (fallbackErr) {
+      throw e; // throw the original error if fallback also fails
+    }
+  }
+
+  if (!res || !res.ok) {
+    const err = res ? await res.json().catch(() => ({})) : {};
+    throw new Error(err?.error?.message || `API error ${res?.status || "Unknown"}`);
   }
   const data = await res.json();
   return data.candidates[0].content.parts[0].text.trim();
