@@ -105,10 +105,14 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
     `You are an English conversation tutor for ${SCHOOL_NAME}. ` +
     `Play the role of a native speaker in a "${scenario}" scenario. ` +
     `The student's level is ${level}. ` +
-    `Rules: (1) Stay in character. (2) Gently correct grammar mistakes naturally. ` +
-    `(3) Match vocabulary to level (simple for A1/A2, richer for B2/C1). ` +
-    `(4) Add a "📝 Tip:" line only when there's something to correct. ` +
-    `(5) End with a follow-up question. (6) Be encouraging. (7) Max 80 words.`;
+    `Rules:\n` +
+    `1. Stay in character in your conversational reply.\n` +
+    `2. Evaluate the student's latest input for spelling, grammar, or vocabulary mistakes.\n` +
+    `3. You MUST respond in JSON format with the following keys:\n` +
+    `   - "reply": Your conversational reply as the character (max 80 words, end with a follow-up question, be encouraging).\n` +
+    `   - "hasError": boolean (true if the student made a spelling, grammar, or vocabulary mistake in their latest input, false otherwise).\n` +
+    `   - "explanation": string (briefly explain the mistake and how to fix it in Spanish, or empty if hasError is false).\n` +
+    `   - "correctedSentence": string (the corrected version of the student's sentence, or empty if hasError is false).`;
 
   // Filter out any error or fallback warning messages from history
   const cleanHistory = history.filter(m => 
@@ -153,7 +157,11 @@ async function callGemini(apiKey, scenario, level, history, userInput) {
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents,
-          generationConfig: { temperature: 0.75, maxOutputTokens: 1000 },
+          generationConfig: { 
+            temperature: 0.75, 
+            maxOutputTokens: 1000,
+            responseMimeType: "application/json"
+          },
         }),
       }
     );
@@ -340,11 +348,34 @@ export default function EnglishDialogueTutor() {
     if (apiKey) {
       setIsLoading(true);
       try {
-        const reply = await callGemini(apiKey, scenario, level, messages, content);
+        const jsonText = await callGemini(apiKey, scenario, level, messages, content);
+        
+        let reply = "";
+        let hasError = false;
+        let notes = [];
+        
+        try {
+          const result = JSON.parse(jsonText);
+          reply = result.reply || "Hello!";
+          hasError = !!result.hasError;
+          if (hasError) {
+            notes = [
+              result.correctedSentence ? `❌ Corrected: "${result.correctedSentence}"` : "",
+              result.explanation ? `💡 Note: ${result.explanation}` : ""
+            ].filter(Boolean);
+          }
+        } catch (e) {
+          // Fallback if parsing fails
+          reply = jsonText;
+          hasError = jsonText.includes("📝");
+          if (hasError) {
+            notes = ["See the 📝 Tip in the tutor's reply."];
+          }
+        }
+
         setMessages(m => [...m, { role: "tutor", text: reply }]);
-        const hasTip = reply.includes("📝");
-        if (hasTip) setMistakeCount(c => c + 1);
-        setLastCorrection({ corrected: content, notes: hasTip ? ["See the 📝 Tip in the tutor's reply."] : [] });
+        if (hasError) setMistakeCount(c => c + 1);
+        setLastCorrection({ corrected: content, notes });
       } catch (err) {
         const msg = err.message;
         setAiError(msg);
