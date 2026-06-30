@@ -495,6 +495,7 @@ export default function EnglishDialogueTutor() {
             setNewStudentName={setNewStudentName} newStudentCourse={newStudentCourse}
             setNewStudentCourse={setNewStudentCourse} setStudents={setStudents}
             downloadTranscript={downloadTranscript} isLoading={isLoading} aiError={aiError}
+            apiKey={apiKey}
           />
         ) : (
           <ErrorBoundary>
@@ -519,7 +520,7 @@ function StudentMode({ scenario, setScenario, level, setLevel, started, startSes
   endAndSaveSession, messages, lastCorrection, input, setInput, onSend, scenarioLabel, turnCount,
   mistakeCount, bottomRef, students, selectedStudentId, setSelectedStudentId, newStudentName,
   setNewStudentName, newStudentCourse, setNewStudentCourse, setStudents, downloadTranscript,
-  isLoading, aiError }) {
+  isLoading, aiError, apiKey }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -591,6 +592,15 @@ function StudentMode({ scenario, setScenario, level, setLevel, started, startSes
 
         {/* Chat */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+          {!apiKey && (
+            <div className="flex gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 mb-3">
+              <AlertTriangle className="h-4.5 w-4.5 shrink-0 text-amber-500 mt-0.5" />
+              <div>
+                <span className="font-semibold block text-amber-800">Modo Demostración Activo (Sin Clave IA)</span>
+                <span>Las respuestas del tutor serán predefinidas y repetitivas. Para activar la Inteligencia Artificial real, el profesor debe ingresar la clave API de Gemini en el <b>Teacher Panel</b> (arriba a la derecha).</span>
+              </div>
+            </div>
+          )}
           <div className="h-[400px] overflow-y-auto pr-1 mb-3">
             {messages.length === 0 && (
               <p className="text-sm text-slate-400 italic p-3">Press <b>Start Scenario</b> to begin the conversation.</p>
@@ -732,11 +742,12 @@ function StudentHistory({ studentId }) {
   );
 }
 
-// ── Teacher Panel ─────────────────────────────────────────────────────────────
 function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurns, totalMistakes, exportProgressCSV, apiKey, setApiKey }) {
   const [keyInput, setKeyInput] = useState(apiKey);
   const [showKey, setShowKey]   = useState(false);
   const [saved, setSaved]       = useState(false);
+  const [testing, setTesting]   = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   const avgTurns    = totalSessions ? (totalTurns / totalSessions).toFixed(1) : "0.0";
   const avgMistakes = totalSessions ? (totalMistakes / totalSessions).toFixed(1) : "0.0";
@@ -745,6 +756,44 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
     setApiKey(keyInput.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+  };
+
+  const handleTestKey = async () => {
+    const keyToTest = keyInput.trim();
+    if (!keyToTest) {
+      setTestResult({ success: false, msg: "Por favor, introduce una clave API antes de probar." });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${keyToTest}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "Respond only with the word OK." }] }],
+            generationConfig: { maxOutputTokens: 10 }
+          })
+        }
+      );
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `Error ${res.status}`);
+      }
+      const data = await res.json();
+      const txt = data.candidates[0].content.parts[0].text.trim();
+      if (txt.toLowerCase().includes("ok")) {
+        setTestResult({ success: true, msg: "¡Conexión exitosa! La clave es válida y está activa." });
+      } else {
+        setTestResult({ success: true, msg: `Conexión establecida, pero la IA respondió algo inusual: "${txt}"` });
+      }
+    } catch (err) {
+      setTestResult({ success: false, msg: `Error de conexión: ${err.message}` });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -770,12 +819,12 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
           The key is stored only in this browser.
         </p>
 
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap gap-2">
+          <div className="relative flex-1 min-w-[200px]">
             <input
               type={showKey ? "text" : "password"}
               value={keyInput}
-              onChange={e => { setKeyInput(e.target.value); setSaved(false); }}
+              onChange={e => { setKeyInput(e.target.value); setSaved(false); setTestResult(null); }}
               placeholder="AIza..."
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 pr-10 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
             />
@@ -788,13 +837,28 @@ function TeacherPanel({ students, progress, byScenario, totalSessions, totalTurn
             className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold shadow hover:bg-indigo-700 transition min-w-[90px]">
             {saved ? "✅ Saved!" : "Save Key"}
           </button>
+          <button onClick={handleTestKey} disabled={testing}
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold shadow transition disabled:opacity-50 min-w-[100px]">
+            {testing ? "Testing..." : "Test Key"}
+          </button>
           {apiKey && (
-            <button onClick={() => { setKeyInput(""); setApiKey(""); }}
+            <button onClick={() => { setKeyInput(""); setApiKey(""); setTestResult(null); }}
               className="px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm font-semibold border border-red-200 hover:bg-red-100 transition">
               Remove
             </button>
           )}
         </div>
+
+        {testResult && (
+          <div className={`mt-3 flex gap-2 text-xs border rounded-xl px-3 py-2.5 ${
+            testResult.success
+              ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+              : "text-red-700 bg-red-50 border-red-200"
+          }`}>
+            {testResult.success ? <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" /> : <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />}
+            <span>{testResult.msg}</span>
+          </div>
+        )}
 
         {!apiKey && (
           <div className="mt-3 flex gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
